@@ -1,0 +1,29 @@
+/* 동글체 (Dongle, SIL Open Font License) — 글자가 작게 보이는 서체라 132%로 키워서 써요 */
+/* 고운돋움 (Gowun Dodum, SIL Open Font License) — 식품 이름처럼 읽기 쉬워야 하는 글자 */
+
+@font-face {
+  font-family: 'Dongle Kids';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(../fonts/dongle-400.woff2) format('woff2');
+  size-adjust: 132%;
+}
+
+@font-face {
+  font-family: 'Dongle Kids';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url(../fonts/dongle-700.woff2) format('woff2');
+  size-adjust: 132%;
+}
+
+@font-face {
+  font-family: 'Gowun Kids';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(../fonts/gowun-400.woff2) format('woff2');
+}
+

@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 우리 가족 구글 이메일만 들어올 수 있어요. (소문자로 적어 주세요)
+    function isFamily() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() in [
+          'padosorinmyheart@gmail.com',
+          'kimhg1481@gmail.com'
+        ];
+    }
+
+    match /families/home/{document=**} {
+      allow read, write: if isFamily();
+    }
+  }
+}
