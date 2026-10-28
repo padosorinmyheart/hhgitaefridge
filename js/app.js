@@ -521,6 +521,20 @@ function menuStats(days, moodOnly) {
   });
   return Object.entries(cnt).sort((a, b) => b[1] - a[1]);
 }
+/* 메뉴별 반응 집계: 같은 메뉴도 날마다 다르니까, 더 많이 나온 반응으로 나눠요 */
+function moodTally(days) {
+  const from = addDays(today(), -days), t = {};
+  Object.values(S.meals).forEach(m => {
+    if (m.child !== "kihun" || !m.date || m.date < from) return;
+    KSLOT.forEach(([k]) => { const sl = m[k]; if (!sl || !sl.menu || !sl.mood) return;
+      sl.menu.split(/[,·]/).map(x => x.trim()).filter(Boolean).forEach(x => { const r = t[x] = t[x] || { great: 0, ok: 0, no: 0 }; r[sl.mood] = (r[sl.mood] || 0) + 1; }); });
+  });
+  const all = Object.entries(t);
+  const likes = all.filter(([, r]) => r.great > r.no).sort((a, b) => (b[1].great - b[1].no) - (a[1].great - a[1].no));
+  const nope = all.filter(([, r]) => r.no > r.great).sort((a, b) => (b[1].no - b[1].great) - (a[1].no - a[1].great));
+  const mixed = all.filter(([, r]) => r.great && r.no && r.great === r.no);
+  return { likes, nope, mixed };
+}
 function kidStock(k) {
   const list = sortedItems().filter(i => i.for === k && !i.baby);
   if (!list.length) return "";
@@ -530,7 +544,8 @@ function kidStock(k) {
 function vKihun() {
   const doc = mealDoc("kihun", S.date), ks = kidSet();
   const chips = menuStats(30).slice(0, 8).map(x => x[0]);
-  const likes = menuStats(60, "great").slice(0, 6), often = menuStats(7).slice(0, 6), nope = menuStats(60, "no").slice(0, 4);
+  const mt = moodTally(60), often = menuStats(7).slice(0, 6);
+  const likes = mt.likes.slice(0, 6), nope = mt.nope.slice(0, 4), mixed = mt.mixed.slice(0, 4);
   const slotCard = ([k, label, emo, cls]) => {
     const sl = doc[k] || {};
     const away = k === "lunch" && ks.autoLunch && isWeekday(S.date) && !sl.home;
@@ -545,6 +560,7 @@ function vKihun() {
     </div>`;
   };
   const tag = (arr, cls) => arr.length ? arr.map(([n, c]) => `<span class="ftag ${cls}">${esc(n)} <small class="num">${c}</small></span>`).join("") : `<span class="tiny">기록이 쌓이면 여기에 보여요</span>`;
+  const mtag = (arr, cls) => arr.length ? arr.map(([n, r]) => `<span class="ftag ${cls}">${esc(n)} <small class="num">😋${r.great}${r.no ? ` 🙅${r.no}` : ""}</small></span>`).join("") : `<span class="tiny">기록이 쌓이면 여기에 보여요</span>`;
   return `${kidsHead("kihun")}
   ${dateNav()}
   ${KSLOT.map(slotCard).join("")}
@@ -553,10 +569,11 @@ function vKihun() {
   </div>
   <div class="card">
     <div class="sec-h"><h2>😋 기훈이가 좋아하는 것</h2></div>
-    <div class="ftags">${tag(likes, "like")}</div>
+    <div class="ftags">${mtag(likes, "like")}</div>
     <div class="sec-h"><h2>🍽️ 요즘 자주 먹은 것</h2><small>최근 7일</small></div>
     <div class="ftags">${tag(often, "")}</div>
-    ${nope.length ? `<div class="sec-h"><h2>🙅 잘 안 먹는 것</h2></div><div class="ftags">${tag(nope, "nope")}</div>` : ""}
+    ${nope.length ? `<div class="sec-h"><h2>🙅 잘 안 먹는 것</h2></div><div class="ftags">${mtag(nope, "nope")}</div>` : ""}
+    ${mixed.length ? `<div class="sec-h"><h2>🤔 그날그날 달라요</h2></div><div class="ftags">${mtag(mixed, "")}</div>` : ""}
   </div>
   ${kidStock("kihun")}`;
 }
@@ -793,8 +810,11 @@ function vCal() {
     const d = new Date(start); d.setDate(start.getDate() + k); const s = ymd(d);
     if (k >= 35 && d.getMonth() !== m - 1) break;
     const dots = (by[s] || []).slice(0, 6).map(c => `<i class="dt ${c}"></i>`).join("");
-    const meal = S.meals["kihun_" + s] || S.meals["taehun_" + s];
-    g += `<button type="button" class="day num ${d.getMonth() !== m - 1 ? "out" : ""} ${s === today() ? "today" : ""}" data-day="${s}" aria-pressed="${s === S.calDay}">${d.getDate()}<span class="dots">${dots}${meal ? `<i class="dt" style="background:var(--ok);border-radius:2px"></i>` : ""}</span></button>`;
+    const km = S.meals["kihun_" + s], tm = S.meals["taehun_" + s];
+    const kOn = km && (km.memo || KSLOT.some(([k]) => km[k] && (km[k].menu || km[k].mood))), tOn = tm && (tm.feeds || []).length;
+    const face = src => `<img src="img/${src}.png" alt="" style="width:14px;height:14px;object-fit:contain;display:block">`;
+    const meal = (kOn ? face("ki-sit") : "") + (tOn ? face("tae-clap") : "");
+    g += `<button type="button" class="day num ${d.getMonth() !== m - 1 ? "out" : ""} ${s === today() ? "today" : ""}" data-day="${s}" aria-pressed="${s === S.calDay}">${d.getDate()}<span class="dots" style="align-items:center">${dots}${meal}</span></button>`;
   }
   const its = S.items.filter(i => i.expiry === S.calDay);
   const cbs = S.cubes.filter(c => c.useBy === S.calDay && (c.count || 0) > 0);
@@ -804,7 +824,7 @@ function vCal() {
   <div class="card">
     <div class="datenav month"><button type="button" data-cm="-1" aria-label="이전 달">‹</button><b class="num">${y}년 ${m}월</b><button type="button" data-cm="1" aria-label="다음 달">›</button></div>
     <div class="cal">${g}</div>
-    <div class="legend">${ZORDER.map(z => `<span class="z-${z}"><i class="dt"></i>${ZONES[z].label}</span>`).join("")}<span><i class="dt" style="background:var(--sub)"></i>큐브</span><span><i class="dt" style="background:var(--ok);border-radius:2px"></i>식사 기록</span></div>
+    <div class="legend">${ZORDER.map(z => `<span class="z-${z}"><i class="dt"></i>${ZONES[z].label}</span>`).join("")}<span><i class="dt" style="background:var(--sub)"></i>큐브</span><span><img src="img/ki-sit.png" alt="" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px"><img src="img/tae-clap.png" alt="" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px;margin-right:2px">식사 기록</span></div>
   </div>
   <div class="card"><div class="sec-h"><h2 style="font-size:19px">${longDate(S.calDay)}</h2></div>
     <div class="items">${its.map(itemRow).join("")}${cbs.map(c => `<div class="item"><span class="fic">${pic(cubeArt(c.name)[0])}</span><span class="info"><b>${esc(c.name)} 큐브</b><span>남은 ${c.count}개 · 추천 사용기한</span></span><div class="right">${badge(c.useBy)}</div></div>`).join("")}</div>
@@ -1112,28 +1132,71 @@ function newReader() {
   hints.set(Z.DecodeHintType.TRY_HARDER, true);
   return new Z.BrowserMultiFormatReader(hints);
 }
-function stopScan() { try { scanReader && scanReader.reset(); } catch (e) {} scanReader = null; }
+/* 바코드: 휴대폰 크롬의 기본 인식기(BarcodeDetector)가 있으면 그걸 쓰고, 없으면 ZXing */
+let scanStream = null, scanTimer = null;
+function stopScan() {
+  try { scanReader && scanReader.reset(); } catch (e) {} scanReader = null;
+  if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+  if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+}
+const BD_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "itf"];
+async function nativeDetector() {
+  if (!("BarcodeDetector" in window)) return null;
+  try {
+    const sup = await window.BarcodeDetector.getSupportedFormats();
+    const f = BD_FORMATS.filter(x => sup.includes(x));
+    return f.length ? new window.BarcodeDetector({ formats: f }) : null;
+  } catch (e) { return null; }
+}
 async function openBarcode() {
   openSheet(`${sheetHead("▥ 바코드로 등록")}
-    <p class="muted" style="margin:-6px 0 0">포장의 바코드를 비춰 주세요. 한 번 등록한 바코드는 다음부터 이름·칸·날짜가 자동으로 채워져요.</p>
-    <div class="scanbox"><video id="bv" playsinline muted></video><span class="scanline"></span><p id="bs" class="scanmsg">카메라 켜는 중…</p></div>
+    <p class="muted" style="margin:-6px 0 0">바코드를 네모 안에 가로로 크게 비춰 주세요.<br>한 번 등록하면 다음부터는 자동이에요.</p>
+    <div class="scanbox"><video id="bv" playsinline muted autoplay></video><span class="scanline"></span><p id="bs" class="scanmsg">카메라 켜는 중…</p></div>
     <div class="actions" style="grid-template-columns:1fr 1fr">
       <label class="btn line fileb">${svg("cam")} 사진으로 찍기<input type="file" accept="image/*" capture="environment" id="bfile"></label>
       <div data-form id="bform" class="row" style="gap:6px"><input class="in num" id="bnum" inputmode="numeric" placeholder="번호 직접" autocomplete="off"><button class="btn sm primary" type="button" data-submit>확인</button></div>
     </div>`);
   const msg = t => { const m = $("#bs"); if (m) m.textContent = t; };
+  const det = await nativeDetector();
   $("#bform").onsubmit = e => { e.preventDefault(); const c = $("#bnum").value.replace(/\D/g, ""); if (c.length >= 8) foundCode(c); else msg("바코드 아래 숫자 8~13자리를 적어 주세요."); };
   $("#bfile").onchange = async e => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
     msg("사진에서 바코드 찾는 중…");
-    try { await loadZX(); const url = URL.createObjectURL(f); const r = await newReader().decodeFromImageUrl(url); URL.revokeObjectURL(url); foundCode(r.getText()); }
-    catch (err) { msg("바코드를 못 찾았어요. 바코드가 크고 또렷하게 나오게 다시 찍어 주세요."); }
+    try {
+      if (det) {
+        const bmp = await createImageBitmap(f);
+        const r = await det.detect(bmp);
+        if (r.length) return foundCode(r[0].rawValue);
+      }
+      await loadZX(); const url = URL.createObjectURL(f); const r = await newReader().decodeFromImageUrl(url); URL.revokeObjectURL(url); foundCode(r.getText());
+    } catch (err) { msg("바코드를 못 찾았어요. 바코드만 크고 또렷하게 나오게 다시 찍어 주세요."); }
   };
+  const cam = { video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: "continuous" }] }, audio: false };
   try {
+    if (det) {
+      stopScan();
+      scanStream = await navigator.mediaDevices.getUserMedia(cam);
+      const v = $("#bv"); if (!v) return stopScan();
+      v.srcObject = scanStream; await v.play();
+      msg("바코드를 네모 안에 맞춰 주세요");
+      let misses = 0;
+      const tick = async () => {
+        if (!scanStream || !$("#bv")) return stopScan();
+        try {
+          const r = v.readyState >= 2 ? await det.detect(v) : [];
+          const hit = r.find(x => /^\d{8,14}$/.test(x.rawValue)) || r[0];
+          if (hit) { stopScan(); return foundCode(hit.rawValue); }
+        } catch (e) {}
+        if (++misses === 40) msg("가까이 대었다가 천천히 떼어 보세요");
+        scanTimer = setTimeout(tick, 150);
+      };
+      tick();
+      return;
+    }
     await loadZX();
     if (!$("#bv")) return;
     stopScan(); scanReader = newReader();
-    await scanReader.decodeFromConstraints({ video: { facingMode: "environment" } }, $("#bv"), (res) => { if (res) { const c = res.getText(); stopScan(); foundCode(c); } });
+    await scanReader.decodeFromConstraints(cam, $("#bv"), (res) => { if (res) { const c = res.getText(); stopScan(); foundCode(c); } });
     msg("바코드를 네모 안에 맞춰 주세요");
   } catch (err) {
     msg("카메라를 쓸 수 없어요. '사진으로 찍기'를 눌러 주세요.");
@@ -1173,9 +1236,8 @@ function addTiles(q) {
 function openAdd() {
   S.addCount = {}; S.addedZones = new Set(); S.addFor = "";
   openSheet(`${sheetHead("🧺 냉장고에 넣기")}
-    <div class="addways ${kidSet().useCube ? "three" : ""}">
+    <div class="addways" style="grid-template-columns:${kidSet().useCube ? "1fr 1fr" : "1fr"}">
       <button type="button" class="btn line" data-go="receipt">${svg("receipt")} 영수증으로</button>
-      <button type="button" class="btn line" data-act="barcode">${svg("barcode")} 바코드로</button>
       ${kidSet().useCube ? `<button type="button" class="btn line" data-go="cube"><img src="img/i-cube.png" alt=""> 이유식 큐브</button>` : ""}
     </div>
     <div class="whorow"><span>누구 꺼?</span>${whoPick("", "data-addfor")}</div>
@@ -1219,8 +1281,8 @@ const GUIDE = [
     "여러 번 누르면 그 개수만큼 들어가요.",
     "그림이 없으면 이름을 적어 넣어요.",
     "날짜는 알림창 <b>날짜 바꾸기</b>로 고쳐요.",
-    "<b>누구 꺼?</b>로 기훈·태훈 표시를 해요.",
-    "<b>바코드</b>는 한 번 적으면 다음엔 자동!"]],
+    "<b>누구 꺼?</b>로 기훈·태훈 표시를 해요."
+  ]],
   ["receipt", "egg", "영수증으로 넣기", [
     "<b>영수증 찍기</b>로 식품을 찾아요.",
     "처음 한 번은 30초쯤 걸려요.",
@@ -1287,7 +1349,7 @@ function openMenu() {
   const grp = (title, items) => `<section class="mgroup"><h3>${title}</h3><div class="mgrid">${items.join("")}</div></section>`;
   openSheet(`${sheetHead("메뉴")}
     ${grp("🧊 냉장고", [it('data-go="home"', "i-basket", "우리 냉장고"), it('data-go="list"', "apple", "식품 목록"), it('data-go="cal"', "i-clock", "캘린더")])}
-    ${grp("🧺 넣기", [it('data-act="add"', "milk", "그림으로"), it('data-go="receipt"', "egg", "영수증으로"), it('data-act="barcode"', "yogurt", "바코드로")])}
+    ${grp("🧺 넣기", [it('data-act="add"', "milk", "그림으로"), it('data-go="receipt"', "egg", "영수증으로")])}
     ${grp("🍼 아이식사", [it('data-go="kihun"', "ki-eat", "기훈 유아식"), it('data-go="taehun"', "tae-clap", "태훈 이유식"), it('data-go="challenge"', "tae-dino", "도전 기록"), ...(kidSet().useCube ? [it('data-go="cube"', "i-cube", "이유식 큐브")] : [])])}
     ${grp("💗 가족", [it('data-go="family"', "bro-hug", "가족 설정"), it('data-act="invite"', "bro-walk", "가족 초대"), `<button type="button" data-act="guide"><span class="emo">📖</span><span>사용 설명서</span></button>`, ...(D.demo ? [] : [`<button type="button" data-act="logout"><span class="emo">🚪</span><span>로그아웃</span></button>`])])}`);
 }
