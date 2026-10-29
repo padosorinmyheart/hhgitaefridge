@@ -482,7 +482,7 @@ function vReceipt() {
 /* ---------- 아이식사 ---------- */
 function mealDoc(child, date) { return S.meals[`${child}_${date}`] || {}; }
 function prepItems() { return (S.meta.prep && S.meta.prep.items) || []; }
-const kidSet = () => Object.assign({ place: "어린이집", autoLunch: true, stage: "초기", times: 1, keepDays: 3, useCube: true }, S.meta.kids || {});
+const kidSet = () => Object.assign({ place: "어린이집", autoLunch: true, stage: "초기", times: 1, keepDays: 3, useCube: true, sideDays: 3 }, S.meta.kids || {});
 const DEFAULT_RULES = ["💗 사 오면 바로 넣기", "🧺 꺼내 쓰면 개수 줄이기", "🗑️ 버리기 전에 날짜 확인"];
 const houseRules = () => (S.meta.rules && S.meta.rules.items) || DEFAULT_RULES;
 function saveRules(items) { S.meta.rules = { items }; render(); D.put("meta", "rules", { items }).catch(writeErr); }
@@ -536,14 +536,68 @@ function moodTally(days) {
   return { likes, nope, mixed };
 }
 function kidStock(k) {
-  const list = sortedItems().filter(i => i.for === k && !i.baby);
+  const list = sortedItems().filter(i => i.for === k && !i.baby && !i.side);
   if (!list.length) return "";
   return `<div class="card"><div class="sec-h"><h2>🧺 ${WHO[k].label}이 몫으로 산 재료</h2><small>${list.length}가지</small></div>
     <div class="items">${list.map(itemRow).join("")}</div></div>`;
 }
+/* 기훈이 반찬: 만든 날 + 보관 일수로 기한을 챙겨요 (냉장고 식품으로도 같이 보여요) */
+const sideItems = () => S.items.filter(i => i.side).sort((a, b) => (a.expiry || "9") < (b.expiry || "9") ? -1 : 1);
+function sideCard() {
+  const list = sideItems();
+  return `<div class="card">
+    <div class="sec-h"><h2><img class="h2ic" src="img/m-bearplate.png" alt="">만들어 둔 반찬</h2><button type="button" class="btn sm primary" data-act="side">${svg("plus")} 반찬</button></div>
+    <div class="items">${list.length ? list.map(i => `<div class="item">
+      <span class="fic">${pic(i.icon || "m-bearplate")}</span>
+      <button type="button" class="info" data-side="${esc(i.id)}"><span class="nm"><b>${esc(i.name)}</b></span><span>${i.madeOn ? md(i.madeOn) + " 만듦 · " : ""}${i.expiry ? md(i.expiry) + "까지" : ""}</span></button>
+      <div class="right">${badge(i.expiry)}<button type="button" class="btn sm line" data-sidedone="${esc(i.id)}" style="min-height:30px;padding:0 10px;font-size:14px">다 먹음</button></div></div>`).join("")
+      : `<div class="empty small">만든 반찬을 적어 두면 기한을 챙겨 줘요.</div>`}</div>
+  </div>`;
+}
+function openSide(it) {
+  const ks = kidSet(), isNew = !it;
+  const v = it ? { name: it.name, madeOn: it.madeOn || today(), days: Math.max(1, Math.round((new Date(it.expiry) - new Date(it.madeOn || today())) / 864e5) || ks.sideDays) } : { name: "", madeOn: today(), days: ks.sideDays };
+  const recent = [...new Set([...((S.meta.settings && S.meta.settings.sides) || []), ...menuStats(30).map(x => x[0])])].filter(n => !/^밥$|^김$|우유|바나나/.test(n)).slice(0, 10);
+  openSheet(`${sheetHead(isNew ? "🍱 기훈이 반찬 만들기" : "🍱 반찬 고치기")}
+    <label class="f"><span>반찬 이름</span><input class="in" id="sdN" value="${esc(v.name)}" placeholder="예: 시금치나물, 소고기장조림" autocomplete="off"></label>
+    ${recent.length ? `<div class="kchips">${recent.map(n => `<button type="button" class="chip sm" data-sdq="${esc(n)}">${esc(n)}</button>`).join("")}</div>` : ""}
+    <div class="f"><span class="tiny">언제 만들었나요?</span><div class="whopick" id="sdD">
+      <button type="button" data-d="0">오늘</button><button type="button" data-d="-1">어제</button><button type="button" data-d="-2">그저께</button></div></div>
+    <div class="row" style="gap:12px;align-items:center"><span class="tiny">냉장 보관</span><span class="step"><button type="button" id="sdM">−</button><output class="num" id="sdC"></output><button type="button" id="sdP">＋</button></span></div>
+    <p class="tiny" id="sdH" style="margin:0"></p>
+    <div class="actions" style="grid-template-columns:1fr 1.4fr">${isNew ? `<button class="btn line" type="button" data-close>취소</button>` : `<button class="btn line" type="button" id="sdDel" style="color:var(--bad)">삭제</button>`}<button class="btn primary" type="button" id="sdS">냉장고에 넣기</button></div>`);
+  const paint = () => {
+    $("#sdC").textContent = v.days + "일";
+    $$("#sdD [data-d]").forEach(b => b.setAttribute("aria-pressed", addDays(today(), +b.dataset.d) === v.madeOn));
+    const exp = addDays(v.madeOn, v.days), d = dday(exp);
+    $("#sdH").textContent = `${md(exp)}까지 먹어요 · ${d < 0 ? `${-d}일 지났어요` : d === 0 ? "오늘까지예요" : `${d}일 남았어요`}`;
+  };
+  paint();
+  $("#sdN").oninput = e => { v.name = e.target.value.trim(); };
+  $("#sheet").onclick = e => { const q = e.target.closest("[data-sdq]"); if (q) { v.name = q.dataset.sdq; $("#sdN").value = v.name; } };
+  $("#sdD").onclick = e => { const b = e.target.closest("[data-d]"); if (b) { v.madeOn = addDays(today(), +b.dataset.d); paint(); } };
+  $("#sdM").onclick = () => { v.days = Math.max(1, v.days - 1); paint(); };
+  $("#sdP").onclick = () => { v.days = Math.min(14, v.days + 1); paint(); };
+  $("#sdS").onclick = () => {
+    if (!v.name) { $("#sdN").focus(); $("#sdH").textContent = "반찬 이름을 적어 주세요."; return; }
+    const id = isNew ? D.newId() : it.id, prev = isNew ? {} : (({ id: _x, ...r }) => r)(it);
+    D.put("items", id, { ...prev, name: v.name, icon: "m-bearplate", zone: "fridge", qty: 1, expiry: addDays(v.madeOn, v.days), side: true, for: "kihun", madeOn: v.madeOn, addedBy: prev.addedBy || S.user.name, addedAt: prev.addedAt || today() }).catch(writeErr);
+    const rec = [v.name, ...((S.meta.settings && S.meta.settings.sides) || []).filter(x => x !== v.name)].slice(0, 12);
+    S.meta.settings = { ...(S.meta.settings || {}), sides: rec }; D.put("meta", "settings", S.meta.settings).catch(() => {});
+    if (v.days !== ks.sideDays) saveKidSet({ sideDays: v.days });
+    closeSheet(); toast(isNew ? `${v.name} 넣었어요 · ${md(addDays(v.madeOn, v.days))}까지` : "고쳤어요");
+  };
+  const del = $("#sdDel");
+  if (del) del.onclick = () => {
+    if (!del.dataset.armed) { del.dataset.armed = 1; del.textContent = "정말 지울까요?"; return; }
+    const { id, ...before } = it; D.remove("items", id).catch(writeErr); closeSheet();
+    toast(`${it.name}을(를) 지웠어요`, () => D.put("items", id, before).catch(writeErr));
+  };
+}
 function vKihun() {
   const doc = mealDoc("kihun", S.date), ks = kidSet();
-  const chips = menuStats(30).slice(0, 8).map(x => x[0]);
+  const sideNames = sideItems().map(i => i.name);
+  const chips = [...new Set([...sideNames, ...menuStats(30).slice(0, 8).map(x => x[0])])];
   const mt = moodTally(60), often = menuStats(7).slice(0, 6);
   const likes = mt.likes.slice(0, 6), nope = mt.nope.slice(0, 4), mixed = mt.mixed.slice(0, 4);
   const slotCard = ([k, label, emo, cls]) => {
@@ -555,7 +609,7 @@ function vKihun() {
         ${k === "lunch" && ks.autoLunch && isWeekday(S.date) ? `<button type="button" class="placebtn ${away ? "on" : ""}" data-away="${away ? "home" : "away"}">${away ? `🏫 ${esc(ks.place)}` : "🏠 집에서 먹음"} <small>바꾸기</small></button>` : ""}</div>
       ${away ? `<p class="tiny">${esc(ks.place)}에서 먹었어요. 반응만 눌러 주세요.</p>` : `
       <input class="in kmenu" data-kmenu="${k}" value="${esc(sl.menu || "")}" placeholder="무엇을 먹었나요?" autocomplete="off" enterkeyhint="done">
-      ${chips.length ? `<div class="kchips">${chips.filter(c => !used.includes(c)).slice(0, 6).map(c => `<button type="button" class="chip sm" data-kchip="${k}" data-v="${esc(c)}">＋ ${esc(c)}</button>`).join("")}</div>` : ""}`}
+      ${chips.length ? `<div class="kchips">${chips.filter(c => !used.includes(c)).slice(0, 7).map(c => `<button type="button" class="chip sm ${sideNames.includes(c) ? "mine" : ""}" data-kchip="${k}" data-v="${esc(c)}">${sideNames.includes(c) ? "🍱" : "＋"} ${esc(c)}</button>`).join("")}</div>` : ""}`}
       <div class="react">${KMOODS.map(([v, e, l]) => `<button type="button" data-kmood="${k}" data-v="${v}" aria-pressed="${sl.mood === v}"><span>${e}</span>${l}</button>`).join("")}</div>
     </div>`;
   };
@@ -564,6 +618,7 @@ function vKihun() {
   return `${kidsHead("kihun")}
   ${dateNav()}
   ${KSLOT.map(slotCard).join("")}
+  ${sideCard()}
   <div class="card">
     <input class="in" id="kmemo" value="${esc(doc.memo || "")}" placeholder="📝 오늘 한 줄 메모 (선택)" autocomplete="off">
   </div>
@@ -947,7 +1002,7 @@ document.addEventListener("click", e => {
   const li = t.closest("[data-list]"); if (li) { S.listFilter = li.dataset.list; return go("list"); }
   const zh = t.closest("[data-zone]"); if (zh) { S.listFilter = zh.dataset.zone; return go("list"); }
   const lf = t.closest("[data-lf]"); if (lf) { S.listFilter = lf.dataset.lf; return render(); }
-  const ed = t.closest("[data-edit]"); if (ed) { const it = S.items.find(i => i.id === ed.dataset.edit); if (it) openItem(it); return; }
+  const ed = t.closest("[data-edit]"); if (ed) { const it = S.items.find(i => i.id === ed.dataset.edit); if (it) (it.side ? openSide : openItem)(it); return; }
   const qb = t.closest("[data-q]"); if (qb) return changeQty(qb.dataset.q, +qb.dataset.d);
   const dd = t.closest("[data-dd]"); if (dd) { S.date = addDays(S.date, +dd.dataset.dd); return render(); }
   const dt = t.closest("[data-date]"); if (dt) { S.date = dt.dataset.date; return render(); }
@@ -971,6 +1026,8 @@ document.addEventListener("click", e => {
     return D.put("meta", "settings", S.meta.settings).catch(writeErr);
   }
   const me = t.closest("[data-me]"); if (me) { localStorage.setItem("fridge-me", me.dataset.me); S.user.name = me.dataset.me; render(); return toast(`이제 ${me.dataset.me} 이름으로 기록해요`); }
+  const sd = t.closest("[data-side]"); if (sd) { const it = S.items.find(x => x.id === sd.dataset.side); if (it) openSide(it); return; }
+  const sdn = t.closest("[data-sidedone]"); if (sdn) { const it = S.items.find(x => x.id === sdn.dataset.sidedone); if (!it) return; const { id, ...before } = it; D.remove("items", id).catch(writeErr); return toast(`${it.name} 다 먹었어요`, () => D.put("items", id, before).catch(writeErr)); }
   const rw = t.closest("[data-rwho]"); if (rw) { S.rc.who = rw.dataset.rwho; return render(); }
   const dz = t.closest("[data-drop]"); if (dz && S.view === "receipt") { if (!S.rc.sel) return toast("먼저 위에서 식품을 골라 주세요"); S.rc.zone = dz.dataset.drop; render(); setTimeout(() => $(".panel") && $(".panel").scrollIntoView({ behavior: "smooth", block: "nearest" }), 30); return; }
   const a = t.closest("[data-act]"); if (a) return act(a.dataset.act, a, e);
@@ -989,6 +1046,7 @@ document.addEventListener("keydown", e => {
 function act(name, el) {
   switch (name) {
     case "back": return goBack();
+    case "side": return openSide();
     case "guide": return openGuide(el.dataset.g);
     case "menu": return openMenu();
     case "bell": return openBell();
@@ -1303,6 +1361,9 @@ const GUIDE = [
     "<b>＋ 메뉴</b>를 누르면 바로 들어가요.",
     "평일 점심은 <b>기관</b>으로 자동이에요.",
     "좋아하는 것·안 먹는 것이 쌓여요.",
+    "<b>만들어 둔 반찬</b>은 만든 날만 눌러요.",
+    "보관 일수가 지나기 전에 알려 줘요.",
+    "반찬 이름은 메뉴 버튼(🍱)에도 떠요.",
     "기훈이 꺼 재료는 맨 아래에 모여요."]],
   ["taehun", "tae-clap", "태훈 이유식", [
     "<b>만들기</b>에서 재료를 골라요.",
